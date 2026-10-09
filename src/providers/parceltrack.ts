@@ -23,9 +23,10 @@ const CODE_TO_STATUS: Record<string, Status> = {
   RT: "exception",
 };
 
-// Código desconhecido NUNCA vira delivered: cai em exception.
+// Match exato (sem trim nem caixa): só "DL" é entregue. Qualquer outro código
+// desconhecido NUNCA vira delivered: cai em exception, com o bruto preservado.
 export function mapCode(code: string): Status {
-  return CODE_TO_STATUS[code.trim().toUpperCase()] ?? "exception";
+  return CODE_TO_STATUS[code] ?? "exception";
 }
 
 export interface ParcelTrackOptions {

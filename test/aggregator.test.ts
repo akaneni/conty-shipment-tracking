@@ -26,9 +26,14 @@ describe("ParcelTrackProvider.normalize", () => {
     expect(out.events[0]).toMatchObject({ status: "exception", raw_status: "ENTREGUE_QUASE" });
   });
 
-  it("não confunde código parecido com entregue", () => {
-    const out = provider.normalize(raw([{ timestamp: "2026-10-02T10:00:00Z", status_code: " dl2 " }]));
-    expect(out.events[0]!.status).toBe("exception");
+  it.each(["dl", " DL ", "DL\n", "DL2", "DELIVERED"])("match exato: %j vira exception, não delivered, com o bruto preservado", (code) => {
+    const out = provider.normalize(raw([{ timestamp: "2026-10-02T10:00:00Z", status_code: code }]));
+    expect(out.events[0]).toMatchObject({ status: "exception", raw_status: code });
+  });
+
+  it("só \"DL\" exato vira delivered", () => {
+    const out = provider.normalize(raw([{ timestamp: "2026-10-02T10:00:00Z", status_code: "DL" }]));
+    expect(out.events[0]!.status).toBe("delivered");
   });
 
   it("rejeita resposta mal formada e data inválida", () => {
@@ -36,6 +41,10 @@ describe("ParcelTrackProvider.normalize", () => {
     expect(() => provider.normalize({ events: "x" })).toThrow(ProviderError);
     expect(() => provider.normalize(raw([{ timestamp: "ontem", status_code: "PO" }]))).toThrow(ProviderError);
     expect(() => provider.normalize(raw([{ timestamp: "2026-10-01T00:00:00Z" }]))).toThrow(ProviderError);
+  });
+
+  it("timestamp sem fuso explícito é rejeitado", () => {
+    expect(() => provider.normalize(raw([{ timestamp: "2026-10-01T00:00:00", status_code: "PO" }]))).toThrow(ProviderError);
   });
 });
 
