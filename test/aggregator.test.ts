@@ -31,6 +31,14 @@ describe("ParcelTrackProvider.normalize", () => {
     expect(out.events[0]).toMatchObject({ status: "exception", raw_status: code });
   });
 
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"])(
+    "código que coincide com propriedade do protótipo (%s) vira exception com o bruto preservado",
+    (code) => {
+      const out = provider.normalize(raw([{ timestamp: "2026-10-02T10:00:00Z", status_code: code }]));
+      expect(out.events[0]).toEqual({ occurred_at: "2026-10-02T10:00:00.000Z", raw_status: code, status: "exception" });
+    },
+  );
+
   it("só \"DL\" exato vira delivered", () => {
     const out = provider.normalize(raw([{ timestamp: "2026-10-02T10:00:00Z", status_code: "DL" }]));
     expect(out.events[0]!.status).toBe("delivered");
