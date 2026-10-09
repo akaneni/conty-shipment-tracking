@@ -132,17 +132,48 @@ describe("atraso com data controlada (limite 120h)", () => {
     expect(env.notifier.sent).toHaveLength(0);
   });
 
-  it("alerta sai uma vez só, mesmo consultando várias vezes", async () => {
+  it("GET repetido nunca grava nem notifica", async () => {
     const env = await setup();
     env.clock.advance(121 * H);
-    await delayed(env);
-    await delayed(env);
-    await env.req("GET", "/shipments/delayed");
+    for (let i = 0; i < 3; i++) {
+      expect(await delayed(env)).toBe(true);
+      await env.req("GET", "/shipments/delayed");
+    }
+    expect(env.notifier.sent).toHaveLength(0);
+    expect((await env.req("GET", `/shipments/${env.id}`)).body.delay_alerted_at).toBeNull();
+  });
+
+  it("alerta sai uma vez só via refresh", async () => {
+    const env = await setup();
+    env.clock.advance(121 * H);
     await env.req("POST", `/shipments/${env.id}/refresh`);
+    await env.req("POST", `/shipments/${env.id}/refresh`);
+    await env.req("POST", "/shipments/check-delays");
     expect(env.notifier.sent).toHaveLength(1);
     expect(env.notifier.sent[0]).toMatchObject({ shipment_id: env.id, tracking_code: "BR1" });
     const g = await env.req("GET", `/shipments/${env.id}`);
     expect(g.body.delay_alerted_at).toBe(new Date(Date.parse("2026-10-01T00:00:00.000Z") + 121 * H).toISOString());
+  });
+
+  it("alerta sai uma vez só via check-delays e devolve os alertados", async () => {
+    const env = await setup();
+    env.clock.advance(121 * H);
+    const first = await env.req("POST", "/shipments/check-delays");
+    expect(first.status).toBe(200);
+    expect(first.body.map((s: any) => s.tracking_code)).toEqual(["BR1"]);
+    const second = await env.req("POST", "/shipments/check-delays");
+    expect(second.body).toEqual([]);
+    expect(env.notifier.sent).toHaveLength(1);
+  });
+
+  it("pacote nunca consultado ao agregador não é atrasado nem alerta", async () => {
+    const env = makeEnv();
+    const s = await env.register("BR9");
+    env.clock.advance(1000 * H);
+    expect((await env.req("GET", `/shipments/${s.id}`)).body.delayed).toBe(false);
+    expect((await env.req("GET", "/shipments/delayed")).body).toEqual([]);
+    expect((await env.req("POST", "/shipments/check-delays")).body).toEqual([]);
+    expect(env.notifier.sent).toHaveLength(0);
   });
 
   it("GET /shipments/delayed lista só os atrasados", async () => {
@@ -156,6 +187,8 @@ describe("atraso com data controlada (limite 120h)", () => {
   it("limite configurável", async () => {
     const env = makeEnv({ hours: 1 });
     const s = await env.register("BR1");
+    env.responses.BR1 = pt([["2026-10-01T00:30:00Z", "TR"]]);
+    await env.req("POST", `/shipments/${s.id}/refresh`);
     env.clock.advance(H + 1);
     expect((await env.req("GET", `/shipments/${s.id}`)).body.delayed).toBe(true);
   });

@@ -18,32 +18,38 @@ export interface ShipmentView extends ShipmentRow {
   events: EventRow[];
 }
 
-// Avalia atraso e dispara o alerta uma única vez (delay_alerted_at).
-function evaluateDelay(deps: Deps, s: ShipmentRow): boolean {
-  const now = deps.clock();
-  const delayed = isDelayed(s, now, deps.transitAlertHours);
-  if (delayed && !s.delay_alerted_at) {
-    deps.notifier.notifyDelay({ shipment_id: s.id, tracking_code: s.tracking_code, shipped_at: s.shipped_at });
-    repo.markDelayAlerted(deps.db, s.id, now.toISOString());
-  }
-  return delayed;
+// Leitura pura: calcula `delayed` sem gravar nada nem notificar.
+function computeDelayed(deps: Deps, s: ShipmentRow): boolean {
+  return isDelayed(s, deps.clock(), deps.transitAlertHours);
+}
+
+// Emite o alerta uma única vez (delay_alerted_at). Só refresh e check-delays chamam.
+function alertIfDelayed(deps: Deps, s: ShipmentRow): boolean {
+  if (s.delay_alerted_at || !computeDelayed(deps, s)) return false;
+  deps.notifier.notifyDelay({ shipment_id: s.id, tracking_code: s.tracking_code, shipped_at: s.shipped_at });
+  repo.markDelayAlerted(deps.db, s.id, deps.clock().toISOString());
+  return true;
 }
 
 export function view(deps: Deps, id: number): ShipmentView | undefined {
   const s = repo.getShipment(deps.db, id);
   if (!s) return undefined;
-  const delayed = evaluateDelay(deps, s);
-  const fresh = repo.getShipment(deps.db, id)!;
-  return { ...fresh, delayed, events: repo.listEvents(deps.db, id) };
+  return { ...s, delayed: computeDelayed(deps, s), events: repo.listEvents(deps.db, id) };
 }
 
 export function listDelayed(deps: Deps): ShipmentView[] {
-  const out: ShipmentView[] = [];
-  for (const s of repo.listShipments(deps.db)) {
-    if (!evaluateDelay(deps, s)) continue;
-    out.push(view(deps, s.id)!);
-  }
-  return out;
+  return repo
+    .listShipments(deps.db)
+    .filter((s) => computeDelayed(deps, s))
+    .map((s) => view(deps, s.id)!);
+}
+
+// Ponto de entrada para um job periódico. Devolve os envios alertados nesta chamada.
+export function checkDelays(deps: Deps): ShipmentView[] {
+  return repo
+    .listShipments(deps.db)
+    .filter((s) => alertIfDelayed(deps, s))
+    .map((s) => view(deps, s.id)!);
 }
 
 export async function refresh(deps: Deps, id: number): Promise<ShipmentView | undefined> {
@@ -63,5 +69,6 @@ export async function refresh(deps: Deps, id: number): Promise<ShipmentView | un
     deps.db.exec("ROLLBACK");
     throw e;
   }
+  alertIfDelayed(deps, repo.getShipment(deps.db, id)!);
   return view(deps, id);
 }

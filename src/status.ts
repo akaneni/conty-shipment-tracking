@@ -45,6 +45,7 @@ export function isDelayed(
   now: Date,
   limitHours: number,
 ): boolean {
-  if (shipment.status === "delivered") return false;
+  // Nunca consultado ao agregador (status null): sem informação, não é atraso.
+  if (shipment.status === null || shipment.status === "delivered") return false;
   return now.getTime() - Date.parse(shipment.shipped_at) > limitHours * 3600_000;
 }

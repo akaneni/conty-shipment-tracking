@@ -32,6 +32,12 @@ describe("deriveState", () => {
     expect(s).toEqual({ status: "delivered", delivered_at: "2026-10-04T10:00:00.000Z" });
   });
 
+  it("empate de occurred_at entre exception e out_for_delivery resolve pelo rank (exception vence)", () => {
+    const t = "2026-10-02T10:00:00.000Z";
+    expect(deriveState([ev(t, "out_for_delivery"), ev(t, "exception")]).status).toBe("exception");
+    expect(deriveState([ev(t, "exception"), ev(t, "out_for_delivery")]).status).toBe("exception");
+  });
+
   it("exceção pode ser seguida de novo status (resolvida)", () => {
     const s = deriveState([
       ev("2026-10-02T10:00:00.000Z", "exception"),
@@ -63,7 +69,7 @@ describe("isDelayed", () => {
   it("entregue acima do limite não é atraso", () => {
     expect(isDelayed({ status: "delivered", shipped_at: shipped }, at(limitMs * 3), 120)).toBe(false);
   });
-  it("sem status ainda (nunca consultado) conta como não entregue", () => {
-    expect(isDelayed({ status: null, shipped_at: shipped }, at(limitMs + 1), 120)).toBe(true);
+  it("nunca consultado ao agregador (sem status) não conta como atrasado", () => {
+    expect(isDelayed({ status: null, shipped_at: shipped }, at(limitMs * 10), 120)).toBe(false);
   });
 });

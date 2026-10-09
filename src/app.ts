@@ -36,6 +36,12 @@ export function createApp(deps: svc.Deps) {
   // Antes de /:id para não ser capturada como id.
   app.get("/shipments/delayed", (c) => c.json(svc.listDelayed(deps)));
 
+  // Job periódico: emite os alertas pendentes (uma vez por pacote).
+  app.post("/shipments/check-delays", (c) => c.json(svc.checkDelays(deps)));
+
+  // Job periódico: emite os alertas pendentes (uma vez por pacote).
+  app.post("/shipments/check-delays", (c) => c.json(svc.checkDelays(deps)));
+
   const parseId = (raw: string) => (/^\d+$/.test(raw) ? Number(raw) : null);
 
   app.get("/shipments/:id", (c) => {
