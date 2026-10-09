@@ -12,7 +12,7 @@ npm run stub   # agregador fictício em :4000 (só para demonstração)
 npm run dev    # API em :3000 (variáveis em .env.example)
 ```
 
-Node 22+. Stack: Hono, `node:sqlite`, vitest.
+Node 22.13+ (`node:sqlite` sem flag; só testei no Node 24). Stack: Hono, `node:sqlite`, vitest.
 
 ## Status normalizados
 
@@ -53,6 +53,8 @@ Normalizado (`NormalizedTracking`, o que o domínio enxerga e grava):
 
 O segundo evento é um código que a transportadora inventou: vira `exception` (nunca `delivered`) e o texto original fica em `raw_status`.
 
+**Match exato.** O mapeamento do código não faz trim nem ignora caixa: só `"DL"` (exatamente) é `delivered`. `"dl"`, `" DL "`, `"DL\n"`, `"DL2"` e `"DELIVERED"` viram `exception`, com o valor original em `raw_status`.
+
 ## API
 
 ```bash
@@ -66,8 +68,11 @@ curl -X POST localhost:3000/shipments/1/refresh
 # status, histórico e "delayed"
 curl localhost:3000/shipments/1
 
-# pacotes atrasados
+# pacotes atrasados (somente leitura)
 curl localhost:3000/shipments/delayed
+
+# emite os alertas pendentes (ponto de entrada de um job periódico); devolve os alertados
+curl -X POST localhost:3000/shipments/check-delays
 ```
 
 Resposta de `GET /shipments/1` (após o refresh com o stub):
@@ -94,7 +99,9 @@ Erros: 400 corpo inválido, 404 envio inexistente, 409 código repetido, 502 agr
 
 **Histórico sem duplicata.** `UNIQUE (shipment_id, occurred_at, raw_status)` com `INSERT OR IGNORE`. A data é normalizada para UTC antes, então o mesmo instante em fusos diferentes é o mesmo evento. Reconsultar não duplica.
 
-**Atraso.** `atrasado = status != delivered E agora - shipped_at > TRANSIT_ALERT_HOURS` (padrão 120 h, comparação estrita: no limite exato ainda não é atraso, 1 ms depois é). Entregue nunca é atraso, por maior que seja o tempo desde o envio. Pacote nunca consultado (sem status) conta como não entregue. O relógio é injetado, então os testes controlam a data. O alerta é emitido uma vez por pacote (`delay_alerted_at`) pela interface `Notifier`, na primeira vez que `GET /shipments/:id`, `GET /shipments/delayed` ou o refresh enxerga o atraso. Não há envio real: só a implementação em memória.
+**Atraso.** `delayed = status != null E status != delivered E agora - shipped_at > TRANSIT_ALERT_HOURS` (padrão 120 h, comparação estrita: no limite exato ainda não é atraso, 1 ms depois é). Entregue nunca é atraso, por maior que seja o tempo desde o envio. Pacote nunca consultado ao agregador (status nulo) tem `delayed: false` até o primeiro refresh, e não dispara alerta. O relógio é injetado, então os testes controlam a data.
+
+**Alerta.** `GET /shipments/:id` e `GET /shipments/delayed` só calculam `delayed`: nunca gravam nem notificam. O alerta é emitido uma vez por pacote (`delay_alerted_at`, via interface `Notifier`) apenas em `POST /shipments/:id/refresh` e em `POST /shipments/check-delays`, que varre os envios e devolve a lista dos alertados naquela chamada. Não há envio real: só a implementação em memória.
 
 **Troca de agregador.** O domínio só conhece `TrackingProvider { fetch(code); normalize(raw) }`. `fetch` devolve algo opaco, `normalize` devolve `NormalizedTracking`. O formato bruto não sai de `src/providers/parceltrack.ts`; `test/swap-provider.test.ts` roda um segundo adaptador de formato diferente sem alterar o domínio.
 
@@ -106,7 +113,7 @@ Hoje o limite é um só. O passo natural é uma tabela `carrier_sla(carrier, rou
 
 - `shipped_at` vem do cadastro (ou do relógio no cadastro); não é inferido do evento `posted`.
 - Data de evento sem fuso explícito é rejeitada (502), para não depender do fuso da máquina.
-- Os dados de exemplo do stub são de outubro de 2026; com o relógio real, podem aparecer como atrasados.
+- Os dados de exemplo do stub são de outubro de 2026 e `shipped_at` do exemplo também; com o relógio real (depois de 120 h), o `delayed` aparece como `true` nos curls (e o `check-delays` alerta).
 
 ## Fora de escopo
 
